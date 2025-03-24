@@ -10,7 +10,10 @@
 ._*
 **/._*
 ._*?
-.yml
-**/*.yml
-*.yml?
+.yaml
+**/*.yaml
+*.yaml?
 /logs/*/
+.jks
+**/*.jks
+*.jks?
