@@ -16,10 +16,15 @@ import com.hmall.pay.enums.PayStatus;
 import com.hmall.pay.mapper.PayOrderMapper;
 import com.hmall.pay.service.IPayOrderService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.concurrent.ListenableFutureCallback;
 
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 /**
  * <p>
@@ -31,12 +36,15 @@ import java.time.LocalDateTime;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PayOrderServiceImpl extends ServiceImpl<PayOrderMapper, PayOrder> implements IPayOrderService {
 
     private final UserClient userClient;
 
-    private final TradeClient tradeClient;
+    //private final TradeClient tradeClient;
 
+    private final RabbitTemplate rabbitTemplate;
+    
     @Override
     public String applyPayOrder(PayApplyDTO applyDTO) {
         // 1.幂等性校验
@@ -69,7 +77,31 @@ public class PayOrderServiceImpl extends ServiceImpl<PayOrderMapper, PayOrder> i
 //        order.setPayTime(LocalDateTime.now());
 //        tradeClient.updateById(order);
         
-        tradeClient.markOrderPaySuccess(po.getBizOrderNo());
+        // TODO 改造为消息队列
+        //tradeClient.markOrderPaySuccess(po.getBizOrderNo());
+        try {
+            //创建correlationData
+            CorrelationData correlationData = new CorrelationData(UUID.randomUUID().toString());
+            correlationData.getFuture().addCallback(new ListenableFutureCallback<CorrelationData.Confirm>() {
+                @Override
+                public void onFailure(Throwable ex) {
+                    log.error("spring amqp内部错误",ex);
+                }
+                
+                @Override
+                public void onSuccess(CorrelationData.Confirm result) {
+                    //判断是否成功
+                    if(result.isAck()){
+                        log.info("消息发送成功");
+                    }else {
+                        log.error("消息发送失败 {}", result.getReason());
+                    }
+                }
+            });
+            rabbitTemplate.convertAndSend("pay.direct","pay.success", po.getBizOrderNo(),correlationData);
+        } catch (Exception e) {
+            log.error("发送订单支付状态通知失败，订单id:{}", po.getBizOrderNo(),e);
+        }
     }
 
     public boolean markPayOrderSuccess(Long id, LocalDateTime successTime) {
